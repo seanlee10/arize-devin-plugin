@@ -62,7 +62,7 @@ SessionEnd ───────► flush pending turn without Stop (marked inco
 ### Repository layout (repo root = the plugin)
 
 ```
-arize-devin-tracing/
+arize-devin-plugin/
 ├── .devin-plugin/plugin.json          # name: arize-devin-tracing
 ├── hooks.json
 ├── scripts/

@@ -40,13 +40,13 @@ Hooks always exit 0 and never write to stdout, so tracing cannot break or block 
 From a local checkout:
 
 ```bash
-devin plugins install --local /path/to/arize-devin-tracing
+devin plugins install --local /path/to/arize-devin-plugin
 ```
 
 Install from GitHub (requires repository access):
 
 ```bash
-devin plugins install seanlee10/arize-devin-tracing
+devin plugins install seanlee10/arize-devin-plugin
 ```
 
 GitHub-installed plugins sync across your machines.
