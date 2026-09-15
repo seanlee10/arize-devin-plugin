@@ -1,0 +1,38 @@
+{
+  "UserPromptSubmit": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "timeout": 10,
+          "command": "${ARIZE_PYTHON:-python3} \"$DEVIN_PLUGIN_ROOT/scripts/hook.py\" UserPromptSubmit"
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "timeout": 15,
+          "command": "${ARIZE_PYTHON:-python3} \"$DEVIN_PLUGIN_ROOT/scripts/hook.py\" Stop"
+        }
+      ]
+    }
+  ],
+  "SessionEnd": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "timeout": 15,
+          "command": "${ARIZE_PYTHON:-python3} \"$DEVIN_PLUGIN_ROOT/scripts/hook.py\" SessionEnd"
+        }
+      ]
+    }
+  ]
+}

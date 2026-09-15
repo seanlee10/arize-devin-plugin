@@ -1,0 +1,7 @@
+{
+  "name": "arize-devin-tracing",
+  "version": "0.1.0",
+  "description": "Trace Devin CLI sessions to Arize AX as OpenInference spans (turns, LLM calls with token counts, tool calls)",
+  "license": "MIT",
+  "keywords": ["arize", "tracing", "observability", "openinference", "opentelemetry"]
+}
