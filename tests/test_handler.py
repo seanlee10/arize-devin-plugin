@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from devin_tracing import log
 from devin_tracing.config import Config
@@ -145,6 +146,34 @@ class TestTurnFlow(HandlerTestCase):
 
 
 class TestFailSafes(HandlerTestCase):
+    def test_failed_export_is_retried_with_same_request(self):
+        self.fire("UserPromptSubmit", prompt_id="p1", prompt="hello")
+        self.write_turn("hello", "hi", tool=False)
+
+        with mock.patch("devin_tracing.handler.export", return_value=False) as send:
+            self.fire("Stop", prompt_id="p1", last_assistant_message="hi")
+        queued = self.state().pending_exports
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(len(queued), 1)
+
+        with mock.patch("devin_tracing.handler.export", return_value=True) as retry:
+            self.fire("SessionStart", source="resume")
+        self.assertEqual(retry.call_count, 1)
+        self.assertEqual(self.state().pending_exports, [])
+
+        first_request = send.call_args.args[0].SerializeToString()
+        retried_request = retry.call_args.args[0].SerializeToString()
+        self.assertEqual(retried_request, first_request)
+
+    def test_session_end_keeps_failed_pending_export(self):
+        self.fire("UserPromptSubmit", prompt_id="p1", prompt="bye")
+        self.write_turn("bye", "done", tool=False)
+        with mock.patch("devin_tracing.handler.export", return_value=False):
+            self.fire("SessionEnd", prompt_id="p1", reason="other")
+
+        self.assertTrue(os.path.exists(state_path(self.state_dir, SID)))
+        self.assertEqual(len(self.state().pending_exports), 1)
+
     def test_prompt_after_missing_stop_flushes_previous_turn_as_incomplete(self):
         self.fire("UserPromptSubmit", prompt_id="p1", prompt="interrupted")
         self.write_turn("interrupted", "partial", tool=False)

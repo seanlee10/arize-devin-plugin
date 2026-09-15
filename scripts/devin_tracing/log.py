@@ -20,7 +20,10 @@ def _write(level, message):
     if not _path:
         return
     try:
-        with open(_path, "a") as f:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(_path, flags, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "a") as f:
             f.write("[%s] [pid %d] %s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), os.getpid(), level, message))
     except OSError:
         pass

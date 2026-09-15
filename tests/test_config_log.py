@@ -91,6 +91,19 @@ class TestLog(unittest.TestCase):
         log.configure(os.path.join(self.tmp.name, "no", "such", "dir", "x.log"), verbose=True)
         log.error("ignored")
 
+    def test_log_file_is_private(self):
+        log.configure(self.path, verbose=False)
+        log.info("private")
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
+
+    def test_existing_log_permissions_are_restricted(self):
+        with open(self.path, "w") as f:
+            f.write("old\n")
+        os.chmod(self.path, 0o644)
+        log.configure(self.path, verbose=False)
+        log.info("new")
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
+
 
 if __name__ == "__main__":
     unittest.main()

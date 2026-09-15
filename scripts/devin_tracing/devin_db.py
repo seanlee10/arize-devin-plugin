@@ -222,6 +222,9 @@ def load_turn(db_path, session_id, after_node_id):
         elif role == "user":
             content = msg.get("content")
             pending_inputs.append({"role": "user", "content": content if isinstance(content, str) else ""})
+        elif role == "system":
+            content = msg.get("content")
+            pending_inputs.append({"role": "system", "content": content if isinstance(content, str) else ""})
 
     # The boundary user prompt is the first input of the first call.
     if boundary >= 0 and chain[boundary][1] is not None and _is_user_input(chain[boundary][1]) and llm_calls:

@@ -53,8 +53,8 @@ Collect at turn start; build and send everything at `Stop`.
 
 ```
 UserPromptSubmit ──► state: pending turn {prompt_id, prompt, started_at}
-Stop ─────────────► read sessions.db chain for this turn ─► build spans ─► one OTLP export ─► state: last_exported_node_id
-SessionEnd ───────► flush pending turn without Stop (marked incomplete) ─► delete state
+Stop ─────────────► read sessions.db ─► build spans ─► durable outbox ─► OTLP export
+SessionEnd ───────► queue pending turn (marked incomplete) ─► retain state until outbox drains
 ```
 
 `PreToolUse`/`PostToolUse` are **not** registered. The database is the source of truth for tools (fact 6), and skipping those hooks avoids starting Python on every tool call.
@@ -121,10 +121,11 @@ Missing credentials without dry run produce one error log line; nothing is sent.
 ### state.py
 
 - File: `$ARIZE_DEVIN_STATE_DIR/<session_id>.json`. Writes go to a temp file followed by `os.replace` (atomic). Hooks within a session run sequentially, so no locking is needed.
-- Shape: `{"turn_count": int, "last_exported_node_id": int|null, "last_exported_prompt_id": str|null, "pending": {"prompt_id", "prompt", "started_at_ns"}|null}`
+- Shape: `{"turn_count": int, "last_exported_node_id": int|null, "last_exported_prompt_id": str|null, "pending": {"prompt_id", "prompt", "started_at_ns"}|null, "pending_exports": [base64_protobuf]}`
+- Pending exports keep their original trace and span IDs and are retried oldest-first on each hook. A failed retry does not block the Devin event or discard newer queued turns.
 - `continuation` is true when `Stop` fires with no pending turn and the same `prompt_id` as the last export.
 - `session_id` is sanitized to `[A-Za-z0-9._-]` before use in a path.
-- On `SessionEnd`, state files not modified for more than 7 days are garbage-collected.
+- On `SessionEnd`, an empty state file is deleted. State with pending exports is retained; files not modified for more than 7 days are garbage-collected.
 
 ### devin_db.py
 
@@ -139,7 +140,7 @@ Missing credentials without dry run produce one error log line; nothing is sent.
      - `turn_number` = count of `is_user_input` nodes in the chain up to and including the boundary. It is derived from the DB so it stays correct across `devin -c` resumes, where the state file was deleted at the previous `SessionEnd`. `state.turn_count` is used only in the degraded fallback.
    - `LlmCall {request_id, model, started_at, ended_at, input_messages, output_text, reasoning, finish_reason, tokens {input, output, cache_read, cache_write}, ttft_ms, tool_calls: [ToolCall]}`
    - `ToolCall {id, name, arguments, output, success, failure_reason, started_at, ended_at}`
-   - `input_messages` for a call are the user/tool messages between the previous assistant node and this one. System nodes are excluded, which keeps spans small.
+   - `input_messages` for a call are the user, tool, and system messages between the previous assistant node and this one.
    - Each tool result node attaches to the `ToolCall` whose `id == tool_call_id`. Timing comes from `chisel/tool_call_timing`, with fallback to the result node's `created_at` for both ends. A tool call with no result node gets `success=None`, `output=None`.
 6. Returns `None` if the session or head is missing or there are no assistant nodes after the boundary. Malformed JSON nodes are skipped with a warning.
 
@@ -158,7 +159,7 @@ Missing credentials without dry run produce one error log line; nothing is sent.
   - `llm.output_messages.0.message.role=assistant`, `.content`, `.tool_calls.{j}.tool_call.function.name/arguments` (JSON)
   - `input.value` (last input message), `output.value` (output text, or a tool-call summary)
   - `devin.reasoning` (thinking text), `devin.finish_reason`, `devin.request_id`, `devin.ttft_ms`
-- **Tool span** `<tool name>`: kind TOOL, child of the LLM span that requested it
+- **Tool span** `<tool name>`: kind TOOL, child of Turn. Tool-call IDs correlate it with the requesting LLM without placing its execution interval outside the completed LLM span.
   - `tool.name`, `tool.parameters` (JSON), `input.value` (JSON args), `output.value`
   - Status `ERROR` with message `failure_reason` when `success is False`, otherwise `OK`. Also `devin.tool_success`.
 - `session.id` goes on every span.
@@ -169,6 +170,7 @@ Missing credentials without dry run produce one error log line; nothing is sent.
 - Serialize the request to protobuf and `POST` it with `urllib.request` to `ARIZE_OTLP_ENDPOINT`, using headers `Content-Type: application/x-protobuf`, `space_id`, `api_key`. Timeout 5s.
 - Retry once on connection error or HTTP 5xx or 429. Log anything other than 2xx with status and at most 500 bytes of the response body. Never raise.
 - Dry run: log one JSON line per span (`name`, `kind`, `trace_id`, `span_id`, `parent`, `status`, attribute keys and truncated values) and send nothing.
+- Log files are opened without following symlinks and forced to mode `0600` because dry-run output contains trace content.
 - Dependency: `opentelemetry-proto` (brings `protobuf`). No `grpcio`. If the import fails, log once: `pip install opentelemetry-proto`.
 
 ### hook.py (event handling)
@@ -176,25 +178,26 @@ Missing credentials without dry run produce one error log line; nothing is sent.
 Read stdin JSON. If tracing is disabled or input is invalid, exit 0. Wrap everything in `try/except Exception` and log the traceback.
 
 - **UserPromptSubmit:** load state. If `pending` is set with a different `prompt_id` (the previous turn never got `Stop`, e.g. Ctrl+C), export that turn first with `incomplete=true`. Then set `pending = {prompt_id, prompt, started_at_ns=now}` and increment `turn_count`.
+- **Every hook:** retry serialized requests in `pending_exports`, oldest first. Keep a failed request for the next hook.
 - **Stop:** `turn = load_turn(db, session_id, state.last_exported_node_id)`.
-  - If a turn is found: first save state (`last_exported_node_id = turn.head_node_id`, `pending = null`), then export it with `meta.prompt_id` from the payload and `last_assistant_message`. Saving first means a Devin-side timeout during export can never cause a duplicate export.
+  - If a turn is found: atomically save the serialized request in `pending_exports` together with `last_exported_node_id = turn.head_node_id` and `pending = null`, then attempt export. Retrying reuses the original trace and span IDs.
   - **Fallback** (no DB, schema mismatch, or no turn): if `pending` exists, export a Turn-only span built from pending plus `last_assistant_message`, with `devin.degraded=true`, and clear `pending`.
   - Re-firing: when a blocking stop hook makes the agent continue, `Stop` fires again. The `after_node_id` boundary then exports only the continuation, as a new trace with the same `devin.prompt_id` and `devin.continuation=true`.
-- **SessionEnd:** if `pending` is set, run the Stop logic with `incomplete=true`. Then delete the state file and GC old state files.
+- **SessionEnd:** if `pending` is set, run the Stop logic with `incomplete=true`. Delete the state file only after the outbox is empty, then GC old state files.
 
 ## Error handling summary
 
 | Failure | Behavior |
 |---|---|
 | Python deps missing | One log line per hook invocation; Devin unaffected |
-| Credentials missing | Log error; no export |
+| Credentials missing | Log error; queue retained for next hook |
 | DB locked, missing, or schema changed | Degraded Turn span from hook data |
 | Malformed node JSON | Skip node, warn |
-| Network or HTTP error | One retry, then log; spans dropped |
+| Network or HTTP error | One retry, then log; serialized request retained |
 | Any unexpected exception | Traceback to log, exit 0 |
-| Hook timeout (Devin-side) | Devin kills the hook and fails open; state is written before export, so the next event does not re-export |
+| Hook timeout (Devin-side) | Devin kills the hook and fails open; the next event retries the saved request with the same IDs |
 
-**Privacy:** spans contain prompts, model output, reasoning, tool arguments and tool output, the same as the Claude Code plugin. The README states this. Logs never contain environment variables or credentials.
+**Privacy:** spans and pending export state contain prompts, model output, reasoning, tool arguments and tool output, the same as the Claude Code plugin. State and logs use user-only permissions. Logs never contain environment variables or credentials.
 
 ## Testing
 

@@ -157,7 +157,7 @@ class TestExport(unittest.TestCase):
         spans = [json.loads(l.split("DRY RUN span ", 1)[1]) for l in lines]
         self.assertEqual([s["kind"] for s in spans], ["AGENT", "LLM", "TOOL"])
         self.assertEqual(spans[1]["parent"], spans[0]["span_id"])
-        self.assertEqual(spans[2]["parent"], spans[1]["span_id"])
+        self.assertEqual(spans[2]["parent"], spans[0]["span_id"])
         self.assertEqual(spans[0]["attributes"]["input.value"], "secret prompt")
         self.assertEqual(spans[2]["status"], "OK")
 

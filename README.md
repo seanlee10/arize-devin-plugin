@@ -7,8 +7,8 @@ Each prompt becomes one trace:
 ```
 Turn 3                     AGENT  prompt → final reply, total tokens
 ├── swe-1-6-slow           LLM    model, prompt/completion/cache-read tokens, reasoning, tool calls
-│   ├── read               TOOL   arguments, output, status OK
-│   └── read               TOOL   status ERROR (ValidationError)
+├── read                   TOOL   arguments, output, status OK
+├── read                   TOOL   status ERROR (ValidationError)
 └── swe-1-6-slow           LLM    final reply
 ```
 
@@ -21,10 +21,10 @@ Devin's hook payloads don't include the model name, token counts, or failed tool
 | Hook | What it does |
 |---|---|
 | `UserPromptSubmit` | Records the pending turn (prompt, start time). If the previous turn never reached `Stop` (e.g. Ctrl+C), exports it as `devin.incomplete`. |
-| `Stop` | Reads the turn from `sessions.db` (read-only), builds the span tree, and sends one OTLP batch. |
-| `SessionEnd` | Exports any turn still pending, then removes the session's state file. |
+| `Stop` | Reads the turn from `sessions.db` (read-only), builds the span tree, and queues one OTLP batch for delivery. |
+| `SessionEnd` | Queues any turn still pending and retains failed deliveries for a later hook retry. |
 
-Hooks always exit 0 and never write to stdout, so tracing cannot break or block a Devin session. If `sessions.db` can't be read, a Turn span built from hook data alone is sent, marked `devin.degraded=true`.
+Hooks always exit 0 and never write to stdout, so tracing cannot break or block a Devin session. Failed deliveries retain the same trace and span IDs in the private session state and retry on the next hook. If `sessions.db` can't be read, a Turn span built from hook data alone is sent, marked `devin.degraded=true`.
 
 ## Requirements
 
@@ -87,7 +87,7 @@ Inside Devin, `/arize-devin-tracing:setup-devin-tracing` walks through setup and
 
 ## Privacy
 
-Spans contain your prompts, model output, reasoning, tool arguments, and tool output (file contents, command output), truncated to `ARIZE_MAX_CONTENT_CHARS`. The log file never contains credentials or environment variables.
+Spans contain your prompts, model output, reasoning, tool arguments, and tool output (file contents, command output), truncated to `ARIZE_MAX_CONTENT_CHARS`. Pending deliveries contain the same data in `~/.arize-devin` with user-only permissions. The log file is also restricted to the current user and never contains credentials or environment variables.
 
 ## Limitations
 

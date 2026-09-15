@@ -16,12 +16,14 @@ def state_path(state_dir, session_id):
 
 
 class SessionState:
-    def __init__(self, path, turn_count=0, last_exported_node_id=None, last_exported_prompt_id=None, pending=None):
+    def __init__(self, path, turn_count=0, last_exported_node_id=None, last_exported_prompt_id=None,
+                 pending=None, pending_exports=None):
         self.path = path
         self.turn_count = turn_count
         self.last_exported_node_id = last_exported_node_id
         self.last_exported_prompt_id = last_exported_prompt_id
         self.pending = pending
+        self.pending_exports = pending_exports or []
 
     @classmethod
     def load(cls, state_dir, session_id):
@@ -37,19 +39,23 @@ class SessionState:
         node_id = data.get("last_exported_node_id")
         prompt_id = data.get("last_exported_prompt_id")
         pending = data.get("pending")
+        pending_exports = data.get("pending_exports")
         return cls(
             path,
             turn_count=turn_count if isinstance(turn_count, int) else 0,
             last_exported_node_id=node_id if isinstance(node_id, int) else None,
             last_exported_prompt_id=prompt_id if isinstance(prompt_id, str) else None,
             pending=pending if isinstance(pending, dict) else None,
+            pending_exports=[item for item in pending_exports if isinstance(item, str)]
+            if isinstance(pending_exports, list) else [],
         )
 
     def save(self):
         directory = os.path.dirname(self.path)
         os.makedirs(directory, mode=0o700, exist_ok=True)
         data = {"turn_count": self.turn_count, "last_exported_node_id": self.last_exported_node_id,
-                "last_exported_prompt_id": self.last_exported_prompt_id, "pending": self.pending}
+                "last_exported_prompt_id": self.last_exported_prompt_id, "pending": self.pending,
+                "pending_exports": self.pending_exports}
         fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp-", suffix=".json")
         try:
             with os.fdopen(fd, "w") as f:

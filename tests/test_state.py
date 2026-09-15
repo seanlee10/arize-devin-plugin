@@ -21,6 +21,7 @@ class TestState(unittest.TestCase):
         self.assertIsNone(s.last_exported_node_id)
         self.assertIsNone(s.last_exported_prompt_id)
         self.assertIsNone(s.pending)
+        self.assertEqual(s.pending_exports, [])
 
     def test_save_and_load_round_trip(self):
         s = SessionState.load(self.dir, "brave-otter")
@@ -28,6 +29,7 @@ class TestState(unittest.TestCase):
         s.last_exported_node_id = 41
         s.last_exported_prompt_id = "p-0"
         s.pending = {"prompt_id": "p", "prompt": "hi", "started_at_ns": 5}
+        s.pending_exports = ["encoded-request"]
         s.save()
 
         loaded = SessionState.load(self.dir, "brave-otter")
@@ -36,6 +38,7 @@ class TestState(unittest.TestCase):
         self.assertEqual(loaded.last_exported_node_id, 41)
         self.assertEqual(loaded.last_exported_prompt_id, "p-0")
         self.assertEqual(loaded.pending, {"prompt_id": "p", "prompt": "hi", "started_at_ns": 5})
+        self.assertEqual(loaded.pending_exports, ["encoded-request"])
 
     def test_save_leaves_no_temp_files(self):
         s = SessionState.load(self.dir, "brave-otter")
@@ -51,9 +54,11 @@ class TestState(unittest.TestCase):
     def test_wrong_types_load_defaults(self):
         os.makedirs(self.dir)
         with open(state_path(self.dir, "brave-otter"), "w") as f:
-            json.dump({"turn_count": "x", "last_exported_node_id": "y", "pending": [1]}, f)
+            json.dump({"turn_count": "x", "last_exported_node_id": "y", "pending": [1],
+                       "pending_exports": [1, "valid"]}, f)
         s = SessionState.load(self.dir, "brave-otter")
         self.assertEqual((s.turn_count, s.last_exported_node_id, s.pending), (0, None, None))
+        self.assertEqual(s.pending_exports, ["valid"])
 
     def test_session_id_is_sanitized_in_path(self):
         path = state_path(self.dir, "../../etc/passwd")

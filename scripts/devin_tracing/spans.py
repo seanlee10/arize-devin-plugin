@@ -145,7 +145,7 @@ def build_request(turn, meta, config):
         child_spans.append(llm_b.span)
 
         for tc in call.tool_calls:
-            tool_b = _SpanBuilder(tc.name, trace_id, llm_b.span.span_id, config)
+            tool_b = _SpanBuilder(tc.name, trace_id, turn_b.span.span_id, config)
             tool_b.set("openinference.span.kind", "TOOL")
             tool_b.set("session.id", turn.session_id)
             tool_b.set("tool.name", tc.name)

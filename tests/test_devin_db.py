@@ -132,6 +132,19 @@ class TestTurnBoundaries(DevinDbTestCase):
         self.assertEqual(turn.user_prompt, "do it")
         self.assertEqual(turn.turn_number, 1)
 
+    def test_system_message_is_input_to_following_llm_call(self):
+        s = self.session()
+        s.user("do it")
+        s.assistant("first")
+        s.system("stop hook: run tests")
+        s.assistant("continued", started=ts(20), at=ts(21))
+        s.set_head()
+
+        turn = load_turn(self.db_path, "brave-otter", None)
+
+        self.assertEqual(turn.llm_calls[1].input_messages,
+                         [{"role": "system", "content": "stop hook: run tests"}])
+
     def test_nothing_new_after_exported_node_returns_none(self):
         s = self.session()
         s.user("do it")

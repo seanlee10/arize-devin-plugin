@@ -73,8 +73,17 @@ class TestBuildRequest(unittest.TestCase):
         for llm in llms:
             self.assertEqual(llm.parent_span_id, turn.span_id)
         for tool in tools:
-            self.assertEqual(tool.parent_span_id, llms[0].span_id)
+            self.assertEqual(tool.parent_span_id, turn.span_id)
         self.assertEqual(len({s.span_id for s in self.spans}), 5)
+
+    def test_parent_spans_cover_child_intervals(self):
+        by_id = {span.span_id: span for span in self.spans}
+        for span in self.spans:
+            if not span.parent_span_id:
+                continue
+            parent = by_id[span.parent_span_id]
+            self.assertLessEqual(parent.start_time_unix_nano, span.start_time_unix_nano)
+            self.assertGreaterEqual(parent.end_time_unix_nano, span.end_time_unix_nano)
 
     def test_turn_span_attributes(self):
         turn = self.by_name["Turn 3"][0]
